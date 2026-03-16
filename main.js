@@ -208,28 +208,45 @@ async function loadText(path) {
 // ─── Camera ──────────────────────────────────────────────────────────────────
 
 async function openCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: {
-      facingMode: { ideal: 'environment' },
-      width:  { ideal: 1920 },
-      height: { ideal: 1080 },
-    },
-  });
+  // Detect if running on RPi (file:// or localhost) vs web
+  const isLocal = location.protocol === 'file:' || location.hostname === 'localhost';
 
-  const video = document.createElement('video');
-  video.srcObject = stream;
-  video.playsInline = true;
-  video.muted = true;
-  video.autoplay = true;
-
-  await new Promise((resolve, reject) => {
-    video.oncanplay = resolve;
-    video.onerror  = reject;
-    video.play().catch(reject);
-  });
-
-  return video;
+  if (isLocal) {
+    // RPi: use native rpicam MJPEG stream
+    const video = document.createElement('video');
+    video.src = 'http://localhost:8888';
+    video.playsInline = true;
+    video.muted = true;
+    video.autoplay = true;
+    await new Promise((resolve, reject) => {
+      video.oncanplay = resolve;
+      video.onerror  = reject;
+      setTimeout(reject, 5000); // 5s timeout
+      video.play().catch(reject);
+    });
+    return video;
+  } else {
+    // Web/mobile: use getUserMedia
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: 'environment' },
+        width:  { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+    });
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    video.playsInline = true;
+    video.muted = true;
+    video.autoplay = true;
+    await new Promise((resolve, reject) => {
+      video.oncanplay = resolve;
+      video.onerror  = reject;
+      video.play().catch(reject);
+    });
+    return video;
+  }
 }
 
 // ─── Effect switcher UI ───────────────────────────────────────────────────────
