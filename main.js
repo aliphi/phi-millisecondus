@@ -15,31 +15,31 @@ uniform float     uTime;
 uniform vec2      uResolution;
 uniform sampler2D uTexture;
 uniform bool      uHasCamera;
+uniform float     uDispX;
+uniform float     uDispY;
+uniform float     uRingWidth;
+uniform float     uSpeed;
 
 varying vec2 vUv;
 
 #define PI 3.14159265359
 
 vec2 rot45(vec2 p) {
-  float c = 0.70710678; // cos(45°) = sin(45°)
+  float c = 0.70710678;
   return vec2(c * p.x - c * p.y, c * p.x + c * p.y);
+}
+vec2 rot45inv(vec2 p) {
+  float c = 0.70710678;
+  return vec2(c * p.x + c * p.y, -c * p.x + c * p.y);
 }
 
 float circlePattern(vec2 centered) {
-  float dist   = length(centered);
-  float result = 0.0;
-  for (int i = 0; i < 4; i++) {
-    float t      = fract(uTime * 0.13 + float(i) * 0.25);
-    float radius = t * 1.15;
-    float alpha  = sin(t * PI);
-    // Expanding ring
-    float sigma  = max(radius * 0.13, 0.03);
-    float ring   = exp(-pow((dist - radius) / sigma, 2.0));
-    // Origin burst: each wave launches from the centre, bright at birth, fades as it expands
-    float burst  = (1.0 - t) * exp(-dist * dist / max(0.002, radius * radius * 0.08));
-    result = max(result, max(ring, burst) * alpha);
-  }
-  return result;
+  float dist  = length(centered);
+  // Continuous outward-expanding rings — no discrete triggers, no pulse
+  // fract() wraps smoothly so new rings emerge from centre endlessly
+  float phase = fract(dist * 1.5 - uTime * uSpeed);
+  float sigma = max(uRingWidth * 0.38, 0.04);
+  return exp(-pow((phase - 0.5) / sigma, 2.0));
 }
 
 // Snap px to block grid, return centered UV in aspect-correct space
@@ -55,20 +55,15 @@ float dualPattern(vec2 px, float block, float aspect) {
   vec2  cA  = snapCentered(px, block, aspect);
   float patA = circlePattern(cA);
 
-  // Layer B: 45°-rotated grid — rotate px around screen centre, snap, rotate back
-  vec2 centre   = uResolution * 0.5;
-  vec2 pxRot    = rot45(px - centre) + centre;
-  vec2 snapRot  = floor(pxRot / block) * block + block * 0.5;
-  // Rotate the snapped centre back to screen space
-  vec2 snapBack = rot45(-(snapRot - centre)) + centre + centre - centre;
-  // Simpler: just use the rotated snap centre directly for the pattern distance
-  vec2 snapRotUV = snapRot / uResolution;
-  // But we need the distance in the *original* (unrotated) aspect-correct space,
-  // so rotate the centred coord back by -45°
-  vec2 cB_rot   = (snapRotUV - 0.5) * vec2(aspect, 1.0);
-  vec2 cB       = vec2(cB_rot.x * 0.70710678 + cB_rot.y * 0.70710678,
-                      -cB_rot.x * 0.70710678 + cB_rot.y * 0.70710678);
-  float patB = circlePattern(cB);
+  // Layer B: 45°-rotated grid passing through vertices of base grid
+  // Rotating around origin (not screen centre) keeps vertices aligned.
+  // Block spacing must be block/√2 so grid lines land on base-grid corners.
+  float blockB  = block * 0.70710678;
+  vec2  pxRot   = rot45(px);
+  vec2  snapRot = floor(pxRot / blockB) * blockB + blockB * 0.5;
+  vec2  snapBack = rot45inv(snapRot);
+  vec2  cB      = (snapBack / uResolution - 0.5) * vec2(aspect, 1.0);
+  float patB    = circlePattern(cB);
 
   // Screen blend: bright where either layer is bright
   return 1.0 - (1.0 - patA) * (1.0 - patB);
@@ -90,10 +85,10 @@ void main() {
       gl_FragColor = vec4(0.45, 0.45, 0.45, 1.0);
       return;
     }
-    // Scale preview coords to match fullscreen pattern
-    float scale  = uResolution.y / prevPx;
-    vec2  previewPx = vec2(px.x, px.y - (uResolution.y - prevPx)) * scale;
-    float pat    = dualPattern(previewPx, block, aspect);
+    // Show full pattern zoomed out — map preview to full resolution range
+    vec2 localUV    = vec2(px.x, px.y - (uResolution.y - prevPx)) / prevPx; // 0..1 in preview
+    vec2 previewPx  = localUV * uResolution; // maps preview across entire screen space
+    float pat       = dualPattern(previewPx, block, aspect);
     gl_FragColor = vec4(vec3(pat), 1.0);
     return;
   }
@@ -108,7 +103,8 @@ void main() {
     // Rotate radial 90° → tangential, pixels slide along rings not away from centre
     vec2  dir         = r > 0.0001 ? vec2(-centered.y, centered.x) / r : vec2(0.0);
     dir.x            /= aspect;
-    vec2 camUV        = vUv + dir * pat * 0.12;
+    float dispPat     = pat * 2.0 - 1.0; // remap [0,1] → [-1,1]
+    vec2 camUV        = vUv + vec2(dir.x * dispPat * uDispX, dir.y * dispPat * uDispY);
     camUV             = clamp(camUV, 0.0, 1.0);
     camUV.x           = 1.0 - camUV.x;
     vec4  cam         = texture2D(uTexture, camUV);
@@ -170,6 +166,10 @@ const uniforms = {
   )},
   uTexture:    { value: new THREE.Texture() },
   uHasCamera:  { value: false },
+  uDispX:      { value: 0.43 },
+  uDispY:      { value: 0.276 },
+  uRingWidth:  { value: 0.6 },
+  uSpeed:      { value: 0.15 },
 };
 
 scene.add(new THREE.Mesh(
@@ -195,6 +195,15 @@ function animate() {
   if (videoTexture) videoTexture.needsUpdate = true;
   renderer.render(scene, camera);
 }
+
+const sliderX = document.getElementById('sliderX');
+const sliderY = document.getElementById('sliderY');
+const sliderW = document.getElementById('sliderW');
+sliderX.addEventListener('input', () => { uniforms.uDispX.value = parseFloat(sliderX.value); document.getElementById('valX').textContent = sliderX.value; });
+sliderY.addEventListener('input', () => { uniforms.uDispY.value = parseFloat(sliderY.value); document.getElementById('valY').textContent = sliderY.value; });
+sliderW.addEventListener('input', () => { uniforms.uRingWidth.value = parseFloat(sliderW.value); document.getElementById('valW').textContent = sliderW.value; });
+const sliderS = document.getElementById('sliderS');
+sliderS.addEventListener('input', () => { uniforms.uSpeed.value = parseFloat(sliderS.value); document.getElementById('valS').textContent = sliderS.value; });
 
 window.addEventListener('load', async () => {
   await startCamera();
