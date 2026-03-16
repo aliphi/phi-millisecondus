@@ -29,14 +29,15 @@ float circlePattern(vec2 centered) {
   float dist   = length(centered);
   float result = 0.0;
   for (int i = 0; i < 4; i++) {
-    float t      = fract(uTime * 0.22 + float(i) * 0.25);
+    float t      = fract(uTime * 0.13 + float(i) * 0.25);
     float radius = t * 1.15;
-    // Sine envelope: smooth fade-in and fade-out
     float alpha  = sin(t * PI);
-    // Gaussian ring: bright halo at the circle edge, dark inside and outside
-    float sigma  = max(radius * 0.28, 0.04);
+    // Expanding ring
+    float sigma  = max(radius * 0.13, 0.03);
     float ring   = exp(-pow((dist - radius) / sigma, 2.0));
-    result = max(result, ring * alpha);
+    // Origin burst: each wave launches from the centre, bright at birth, fades as it expands
+    float burst  = (1.0 - t) * exp(-dist * dist / max(0.002, radius * radius * 0.08));
+    result = max(result, max(ring, burst) * alpha);
   }
   return result;
 }
@@ -101,10 +102,11 @@ void main() {
   float pat = dualPattern(px, block, aspect);
 
   if (uHasCamera) {
-    // Displacement direction from axis-aligned layer (radially outward)
+    // Displacement direction: tangential (perpendicular to radial = lateral swirl)
     vec2 centered     = snapCentered(px, block, aspect);
     float r           = length(centered);
-    vec2  dir         = r > 0.0001 ? centered / r : vec2(0.0);
+    // Rotate radial 90° → tangential, pixels slide along rings not away from centre
+    vec2  dir         = r > 0.0001 ? vec2(-centered.y, centered.x) / r : vec2(0.0);
     dir.x            /= aspect;
     vec2 camUV        = vUv + dir * pat * 0.12;
     camUV             = clamp(camUV, 0.0, 1.0);
