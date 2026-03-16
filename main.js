@@ -19,6 +19,7 @@ uniform float     uDispX;
 uniform float     uDispY;
 uniform float     uRingWidth;
 uniform float     uSpeed;
+uniform float     uDPR;
 
 varying vec2 vUv;
 
@@ -72,7 +73,7 @@ float dualPattern(vec2 px, float block, float aspect) {
 void main() {
   vec2  px     = gl_FragCoord.xy;
   float aspect = uResolution.x / uResolution.y;
-  float block  = 48.0;
+  float block  = 48.0 * uDPR;
 
   // ── Main area ─────────────────────────────────────────────────────────────
   float pat = dualPattern(px, block, aspect);
@@ -85,7 +86,7 @@ void main() {
     dir.x            /= aspect;
     float dispPat     = pat * 2.0 - 1.0; // remap [0,1] → [-1,1]
     // Fade displacement at edges to prevent stretching/clamping artifacts
-    vec2  edgeFade    = smoothstep(0.0, 0.12, vUv) * smoothstep(1.0, 0.88, vUv);
+    vec2  edgeFade    = smoothstep(0.0, 0.20, vUv) * smoothstep(1.0, 0.80, vUv);
     float fade        = edgeFade.x * edgeFade.y;
     vec2  disp        = vec2(dir.x * dispPat * uDispX, dir.y * dispPat * uDispY) * fade;
     // Subtle chromatic aberration: R/B offset slightly along displacement axis
@@ -157,6 +158,7 @@ const uniforms = {
   uDispY:      { value: 0.276 },
   uRingWidth:  { value: 0.6 },
   uSpeed:      { value: 0.15 },
+  uDPR:        { value: window.devicePixelRatio },
 };
 
 scene.add(new THREE.Mesh(
@@ -170,6 +172,7 @@ window.addEventListener('resize', () => {
     window.innerWidth  * window.devicePixelRatio,
     window.innerHeight * window.devicePixelRatio,
   );
+  uniforms.uDPR.value = window.devicePixelRatio;
 });
 
 // ─── Start camera, then begin render loop ─────────────────────────────────────
