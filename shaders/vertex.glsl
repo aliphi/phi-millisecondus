@@ -9,6 +9,8 @@
  *   vUv  — texture coordinates in [0,1] range, passed to the fragment shader
  */
 
+precision highp float;
+
 // Uniforms shared with the fragment shader (declared here if you need them
 // in the vertex stage too — most effects only use them in the fragment stage).
 uniform float uTime;

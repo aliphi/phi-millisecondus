@@ -17,7 +17,7 @@ import * as THREE from 'three';
 // Prepended to every fragment shader so each effect only needs void main(){}.
 
 const GLSL_HEAD = /* glsl */`
-precision mediump float;
+precision highp float;
 
 // Live camera frame
 uniform sampler2D uTexture;
