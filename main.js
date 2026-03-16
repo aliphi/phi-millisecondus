@@ -124,24 +124,29 @@ void main() {
 let videoTexture = null;
 
 async function startCamera() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: false,
-    });
-    const video       = document.createElement('video');
-    video.srcObject   = stream;
-    video.muted       = true;
-    video.playsInline = true;
-    await video.play();
-    videoTexture          = new THREE.VideoTexture(video);
-    videoTexture.minFilter = THREE.LinearFilter;
-    videoTexture.magFilter = THREE.LinearFilter;
-    uniforms.uTexture.value   = videoTexture;
-    uniforms.uHasCamera.value = true;
-  } catch (e) {
-    console.error('Camera error:', e);
+  const constraints = [
+    { video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+    { video: true, audio: false },
+  ];
+  for (const c of constraints) {
+    try {
+      const stream      = await navigator.mediaDevices.getUserMedia(c);
+      const video       = document.createElement('video');
+      video.srcObject   = stream;
+      video.muted       = true;
+      video.playsInline = true;
+      await video.play();
+      videoTexture           = new THREE.VideoTexture(video);
+      videoTexture.minFilter = THREE.LinearFilter;
+      videoTexture.magFilter = THREE.LinearFilter;
+      uniforms.uTexture.value   = videoTexture;
+      uniforms.uHasCamera.value = true;
+      return;
+    } catch (e) {
+      console.warn('Camera attempt failed:', e);
+    }
   }
+  console.error('All camera attempts failed');
 }
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -177,9 +182,9 @@ window.addEventListener('resize', () => {
   );
 });
 
-// ─── Auto-start camera ────────────────────────────────────────────────────────
+// ─── Auto-start camera after page is fully loaded ─────────────────────────────
 
-startCamera();
+window.addEventListener('load', startCamera);
 
 // ─── Render loop ──────────────────────────────────────────────────────────────
 
