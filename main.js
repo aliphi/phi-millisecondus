@@ -34,11 +34,9 @@ vec2 rot45inv(vec2 p) {
   return vec2(c * p.x + c * p.y, -c * p.x + c * p.y);
 }
 
-float circlePattern(vec2 centered) {
+float circlePattern(vec2 centered, float phaseOffset) {
   float dist  = length(centered);
-  // Continuous outward-expanding rings — no discrete triggers, no pulse
-  // fract() wraps smoothly so new rings emerge from centre endlessly
-  float phase = fract(dist * 1.5 - uTime * uSpeed);
+  float phase = fract(dist * 1.5 - uTime * uSpeed + phaseOffset);
   float sigma = max(uRingWidth * 0.38, 0.04);
   return exp(-pow((phase - 0.5) / sigma, 2.0));
 }
@@ -54,7 +52,7 @@ vec2 snapCentered(vec2 px, float block, float aspect) {
 float dualPattern(vec2 px, float block, float aspect) {
   // Layer A: normal axis-aligned grid
   vec2  cA  = snapCentered(px, block, aspect);
-  float patA = circlePattern(cA);
+  float patA = circlePattern(cA, 0.0);
 
   // Layer B: 45°-rotated grid passing through vertices of base grid
   // Rotating around origin (not screen centre) keeps vertices aligned.
@@ -64,7 +62,7 @@ float dualPattern(vec2 px, float block, float aspect) {
   vec2  snapRot = floor(pxRot / blockB) * blockB + blockB * 0.5;
   vec2  snapBack = rot45inv(snapRot);
   vec2  cB      = (snapBack / uResolution - 0.5) * vec2(aspect, 1.0);
-  float patB    = circlePattern(cB);
+  float patB    = circlePattern(cB, 0.37);
 
   // Screen blend: bright where either layer is bright
   return 1.0 - (1.0 - patA) * (1.0 - patB);
@@ -83,14 +81,14 @@ void main() {
     // Layer B (45°-rotated grid)  → drives Y displacement
     // Their intersection creates the star/diamond warp geometry
     vec2  cA      = snapCentered(px, block, aspect);
-    float patA    = circlePattern(cA);
+    float patA    = circlePattern(cA, 0.0);
 
     float blockB  = block * 0.70710678;
     vec2  pxRot   = rot45(px);
     vec2  snapRot = floor(pxRot / blockB) * blockB + blockB * 0.5;
     vec2  snapBk  = rot45inv(snapRot);
     vec2  cB      = (snapBk / uResolution - 0.5) * vec2(aspect, 1.0);
-    float patB    = circlePattern(cB);
+    float patB    = circlePattern(cB, 0.37);
 
     float dA = patA * 2.0 - 1.0; // [0,1] → [-1,1]
     float dB = patB * 2.0 - 1.0;
@@ -109,6 +107,7 @@ void main() {
     float cr       = texture2D(uTexture, uvR).r;
     float cg       = texture2D(uTexture, uvG).g;
     float cb       = texture2D(uTexture, uvB).b;
+
     gl_FragColor = vec4(cr, cg, cb, 1.0);
   } else {
     gl_FragColor = vec4(vec3(pat), 1.0);
@@ -166,10 +165,10 @@ const uniforms = {
   )},
   uTexture:    { value: new THREE.Texture() },
   uHasCamera:  { value: false },
-  uDispX:      { value: 0.43 },
-  uDispY:      { value: 0.276 },
+  uDispX:      { value: 0.2 },
+  uDispY:      { value: 0.2 },
   uRingWidth:  { value: 0.6 },
-  uSpeed:      { value: 0.15 },
+  uSpeed:      { value: 0.07 },
   uDPR:        { value: window.devicePixelRatio },
 };
 
