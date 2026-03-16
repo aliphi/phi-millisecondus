@@ -79,24 +79,36 @@ void main() {
   float pat = dualPattern(px, block, aspect);
 
   if (uHasCamera) {
-    // Radial displacement: black=inward, gray=none, white=outward — fully symmetric
-    vec2 centered     = snapCentered(px, block, aspect);
-    float r           = length(centered);
-    vec2  dir         = r > 0.0001 ? centered / r : vec2(0.0);
-    dir.x            /= aspect;
-    float dispPat     = pat * 2.0 - 1.0; // remap [0,1] → [-1,1]
-    // Fade displacement at edges to prevent stretching/clamping artifacts
-    vec2  edgeFade    = smoothstep(0.0, 0.20, vUv) * smoothstep(1.0, 0.80, vUv);
-    float fade        = edgeFade.x * edgeFade.y;
-    vec2  disp        = vec2(dir.x * dispPat * uDispX, dir.y * dispPat * uDispY) * fade;
-    // Subtle chromatic aberration: R/B offset slightly along displacement axis
-    float cab         = 0.004;
-    vec2  uvR         = clamp(vec2(1.0 - (vUv.x + disp.x + dir.x * cab), vUv.y + disp.y + dir.y * cab), 0.0, 1.0);
-    vec2  uvG         = clamp(vec2(1.0 - (vUv.x + disp.x),               vUv.y + disp.y              ), 0.0, 1.0);
-    vec2  uvB         = clamp(vec2(1.0 - (vUv.x + disp.x - dir.x * cab), vUv.y + disp.y - dir.y * cab), 0.0, 1.0);
-    float cr          = texture2D(uTexture, uvR).r;
-    float cg          = texture2D(uTexture, uvG).g;
-    float cb          = texture2D(uTexture, uvB).b;
+    // Layer A (axis-aligned grid) → drives X displacement
+    // Layer B (45°-rotated grid)  → drives Y displacement
+    // Their intersection creates the star/diamond warp geometry
+    vec2  cA      = snapCentered(px, block, aspect);
+    float patA    = circlePattern(cA);
+
+    float blockB  = block * 0.70710678;
+    vec2  pxRot   = rot45(px);
+    vec2  snapRot = floor(pxRot / blockB) * blockB + blockB * 0.5;
+    vec2  snapBk  = rot45inv(snapRot);
+    vec2  cB      = (snapBk / uResolution - 0.5) * vec2(aspect, 1.0);
+    float patB    = circlePattern(cB);
+
+    float dA = patA * 2.0 - 1.0; // [0,1] → [-1,1]
+    float dB = patB * 2.0 - 1.0;
+
+    // Wider edge fade + capped magnitude to kill border stretching
+    vec2  edgeFade = smoothstep(0.0, 0.28, vUv) * smoothstep(1.0, 0.72, vUv);
+    float fade     = edgeFade.x * edgeFade.y;
+    vec2  disp     = vec2(dA * uDispX, dB * uDispY) * fade;
+
+    // Chromatic aberration along the displacement direction
+    float cab      = 0.004;
+    vec2  cabDir   = length(disp) > 0.0001 ? normalize(disp) : vec2(0.0);
+    vec2  uvR      = clamp(vec2(1.0 - (vUv.x + disp.x + cabDir.x * cab), vUv.y + disp.y + cabDir.y * cab), 0.0, 1.0);
+    vec2  uvG      = clamp(vec2(1.0 - (vUv.x + disp.x),                  vUv.y + disp.y                 ), 0.0, 1.0);
+    vec2  uvB      = clamp(vec2(1.0 - (vUv.x + disp.x - cabDir.x * cab), vUv.y + disp.y - cabDir.y * cab), 0.0, 1.0);
+    float cr       = texture2D(uTexture, uvR).r;
+    float cg       = texture2D(uTexture, uvG).g;
+    float cb       = texture2D(uTexture, uvB).b;
     gl_FragColor = vec4(cr, cg, cb, 1.0);
   } else {
     gl_FragColor = vec4(vec3(pat), 1.0);
