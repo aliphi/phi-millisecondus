@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Persian Mirrorworks</title>
+  <title>Camera Shader</title>
   <style>
     html, body {
       margin: 0;
@@ -13,7 +13,11 @@
       overflow: hidden;
       background: #000;
     }
-    canvas { display: block; }
+    canvas {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
+    }
     #overlay {
       position: fixed;
       inset: 0;
@@ -34,6 +38,13 @@
 </head>
 <body>
   <div id="overlay">Starting camera…</div>
+
+  <!--
+    Import map: pins Three.js to a specific version so it works offline
+    once the browser has cached the CDN response.
+    For fully offline RPi deployment, swap the URL for a local copy:
+      "three": "./vendor/three.module.js"
+  -->
   <script type="importmap">
     {
       "imports": {
@@ -41,6 +52,7 @@
       }
     }
   </script>
+
   <script type="module" src="main.js"></script>
 </body>
 </html>
