@@ -74,34 +74,14 @@ void main() {
   float aspect = uResolution.x / uResolution.y;
   float block  = 48.0;
 
-  // ── Corner preview (top-left, 180px square) ───────────────────────────────
-  float prevPx  = 180.0;
-  float border  = 2.0;
-  bool inCorner = px.x < prevPx && px.y > uResolution.y - prevPx;
-
-  if (inCorner) {
-    if (px.x < border || px.y > uResolution.y - border ||
-        px.x > prevPx - border || px.y < uResolution.y - prevPx + border) {
-      gl_FragColor = vec4(0.45, 0.45, 0.45, 1.0);
-      return;
-    }
-    // Show full pattern zoomed out — map preview to full resolution range
-    vec2 localUV    = vec2(px.x, px.y - (uResolution.y - prevPx)) / prevPx; // 0..1 in preview
-    vec2 previewPx  = localUV * uResolution; // maps preview across entire screen space
-    float pat       = dualPattern(previewPx, block, aspect);
-    gl_FragColor = vec4(vec3(pat), 1.0);
-    return;
-  }
-
   // ── Main area ─────────────────────────────────────────────────────────────
   float pat = dualPattern(px, block, aspect);
 
   if (uHasCamera) {
-    // Displacement direction: tangential (perpendicular to radial = lateral swirl)
+    // Radial displacement: black=inward, gray=none, white=outward — fully symmetric
     vec2 centered     = snapCentered(px, block, aspect);
     float r           = length(centered);
-    // Rotate radial 90° → tangential, pixels slide along rings not away from centre
-    vec2  dir         = r > 0.0001 ? vec2(-centered.y, centered.x) / r : vec2(0.0);
+    vec2  dir         = r > 0.0001 ? centered / r : vec2(0.0);
     dir.x            /= aspect;
     float dispPat     = pat * 2.0 - 1.0; // remap [0,1] → [-1,1]
     vec2 camUV        = vUv + vec2(dir.x * dispPat * uDispX, dir.y * dispPat * uDispY);
