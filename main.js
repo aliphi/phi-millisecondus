@@ -124,29 +124,32 @@ void main() {
 let videoTexture = null;
 
 async function startCamera() {
-  const constraints = [
-    { video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
-    { video: true, audio: false },
-  ];
-  for (const c of constraints) {
-    try {
-      const stream      = await navigator.mediaDevices.getUserMedia(c);
-      const video       = document.createElement('video');
-      video.srcObject   = stream;
-      video.muted       = true;
-      video.playsInline = true;
-      await video.play();
-      videoTexture           = new THREE.VideoTexture(video);
-      videoTexture.minFilter = THREE.LinearFilter;
-      videoTexture.magFilter = THREE.LinearFilter;
-      uniforms.uTexture.value   = videoTexture;
-      uniforms.uHasCamera.value = true;
-      return;
-    } catch (e) {
-      console.warn('Camera attempt failed:', e);
-    }
-  }
-  console.error('All camera attempts failed');
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: {
+      facingMode: { ideal: 'environment' },
+      width:  { ideal: 1280 },
+      height: { ideal: 720 },
+    },
+  });
+
+  const video       = document.createElement('video');
+  video.srcObject   = stream;
+  video.playsInline = true;
+  video.muted       = true;
+  video.autoplay    = true;
+
+  await new Promise((resolve, reject) => {
+    video.oncanplay = resolve;
+    video.onerror   = reject;
+    video.play().catch(reject);
+  });
+
+  videoTexture           = new THREE.VideoTexture(video);
+  videoTexture.minFilter = THREE.LinearFilter;
+  videoTexture.magFilter = THREE.LinearFilter;
+  uniforms.uTexture.value   = videoTexture;
+  uniforms.uHasCamera.value = true;
 }
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
