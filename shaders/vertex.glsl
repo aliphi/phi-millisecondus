@@ -1,5 +1,8 @@
 /**
- * vertex.glsl — passthrough vertex shader
+ * vertex.glsl — reference copy (not loaded at runtime)
+ *
+ * The inline VERT constant in main.js is used instead, so all passes
+ * (simple effects and fluid sim) share one vertex shader without a fetch.
  *
  * The mesh is a 2×2 PlaneGeometry rendered through an OrthographicCamera
  * that maps NDC (-1..1) directly to the viewport, so position is passed

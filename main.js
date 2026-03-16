@@ -1,211 +1,246 @@
 /**
  * Camera Shader — main.js
  *
- * Flow:
- *   1. Fetch shaders/vertex.glsl from disk
- *   2. Open the camera via getUserMedia (works on RPi /dev/video0 and mobile)
- *   3. Feed the camera stream into a Three.js VideoTexture
- *   4. Render the texture onto a fullscreen quad with a ShaderMaterial
- *   5. A cycling button lets you switch between built-in effects at runtime
+ * Fluid dynamics displacement applied to the live camera feed.
  *
- * Adding a new effect: append an entry to the EFFECTS array below.
+ *   ┌──────────────┐     ┌──────────────┐
+ *   │ copy pass    │     │ motion pass  │
+ *   │ cam→rtCamCurr│────▶│ curr vs prev │──▶ rtMotion
+ *   └──────────────┘     └──────────────┘
+ *                                              │
+ *   ┌────────────────────────────────────────┐ │
+ *   │ wave pass  (3-buffer rotation, no R/W  │◀┘
+ *   │ hazard: read A+B, write T, rotate)     │
+ *   └────────────────────────────────────────┘
+ *                │
+ *   ┌────────────▼──────────────────────────────┐
+ *   │ display: gradient(wave) → UV displacement  │──▶ screen
+ *   └────────────────────────────────────────────┘
  */
 
 import * as THREE from 'three';
 
-// ─── Shared GLSL header ───────────────────────────────────────────────────────
-// Prepended to every fragment shader so each effect only needs void main(){}.
-
-const GLSL_HEAD = /* glsl */`
+// ─── Vertex shader (all passes) ───────────────────────────────────────────────
+const VERT = /* glsl */`
 precision highp float;
-
-// Live camera frame
-uniform sampler2D uTexture;
-
-// Seconds since page load — use for animations
-uniform float uTime;
-
-// Canvas size in physical pixels (width * devicePixelRatio, height * devicePixelRatio)
-uniform vec2 uResolution;
-
-// Texture coords: (0,0) = bottom-left, (1,1) = top-right
 varying vec2 vUv;
-`;
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position, 1.0);
+}`;
 
-// ─── Effects ──────────────────────────────────────────────────────────────────
-// Each entry: { name: string, frag: string }
-// frag is the body after the shared header — just write void main(){}.
+// ─── Fluid dynamics shaders ───────────────────────────────────────────────────
 
-const EFFECTS = [
-  {
-    name: 'Passthrough',
-    frag: GLSL_HEAD + /* glsl */`
+// Copy: blit any texture to a render target at sim resolution
+const COPY_FRAG = /* glsl */`
+precision highp float;
+uniform sampler2D uTexture;
+varying vec2 vUv;
 void main() {
   gl_FragColor = texture2D(uTexture, vUv);
-}`,
-  },
+}`;
 
-  {
-    name: 'Greyscale',
-    frag: GLSL_HEAD + /* glsl */`
+// Motion: luminance difference between consecutive camera frames → [0,1]
+const MOTION_FRAG = /* glsl */`
+precision highp float;
+uniform sampler2D uCurrent;   // camera frame this tick
+uniform sampler2D uPrevious;  // camera frame last tick
+varying vec2 vUv;
 void main() {
-  vec3 c = texture2D(uTexture, vUv).rgb;
-  float luma = dot(c, vec3(0.299, 0.587, 0.114));
-  gl_FragColor = vec4(vec3(luma), 1.0);
-}`,
-  },
+  vec3 curr = texture2D(uCurrent,  vUv).rgb;
+  vec3 prev = texture2D(uPrevious, vUv).rgb;
+  float diff = length(curr - prev);
+  float motion = smoothstep(0.02, 0.2, diff);
+  gl_FragColor = vec4(motion, 0.0, 0.0, 1.0);
+}`;
 
-  {
-    name: 'Invert',
-    frag: GLSL_HEAD + /* glsl */`
+// Wave: discrete wave equation with motion as source term (3-buffer ping-pong)
+//   next = 2·curr - prev + α·∇²curr      (α = 0.25 → CFL-stable)
+const WAVE_FRAG = /* glsl */`
+precision highp float;
+uniform sampler2D uWaveCurr;  // height field at t
+uniform sampler2D uWavePrev;  // height field at t-1
+uniform sampler2D uMotion;    // motion magnitude [0,1]
+uniform vec2      uSimRes;    // simulation grid size
+varying vec2 vUv;
+
 void main() {
-  vec4 c = texture2D(uTexture, vUv);
-  gl_FragColor = vec4(1.0 - c.rgb, 1.0);
-}`,
-  },
+  vec2 px = 1.0 / uSimRes;
 
-  {
-    name: 'Chromatic Aberration',
-    frag: GLSL_HEAD + /* glsl */`
+  float curr = texture2D(uWaveCurr, vUv).r;
+  float prev = texture2D(uWavePrev, vUv).r;
+
+  // 5-point Laplacian
+  float n = texture2D(uWaveCurr, vUv + vec2(0.0,  px.y)).r;
+  float s = texture2D(uWaveCurr, vUv + vec2(0.0, -px.y)).r;
+  float e = texture2D(uWaveCurr, vUv + vec2( px.x, 0.0)).r;
+  float w = texture2D(uWaveCurr, vUv + vec2(-px.x, 0.0)).r;
+
+  float wave = 2.0 * curr - prev + 0.25 * (n + s + e + w - 4.0 * curr);
+
+  // Damping — raise toward 1.0 for longer-lived ripples
+  wave *= 0.991;
+
+  // Inject motion as a height impulse
+  float motion = texture2D(uMotion, vUv).r;
+  wave += motion * 0.9;
+
+  gl_FragColor = vec4(clamp(wave, -2.0, 2.0), 0.0, 0.0, 1.0);
+}`;
+
+// Display: displace camera UVs using the wave gradient + subtle chromatic split
+const FLUID_DISP_FRAG = /* glsl */`
+precision highp float;
+uniform sampler2D uTexture;    // live camera feed (full resolution)
+uniform sampler2D uFluid;      // wave height field
+uniform vec2      uResolution; // canvas physical pixels
+uniform vec2      uSimRes;     // simulation grid size
+uniform float     uTime;
+varying vec2 vUv;
+
 void main() {
-  // Aberration amount pulses gently over time
-  float amount = 0.006 + 0.004 * sin(uTime * 1.3);
+  vec2 px = 1.0 / uSimRes;
 
-  float r = texture2D(uTexture, vUv + vec2( amount, 0.0)).r;
-  float g = texture2D(uTexture, vUv                    ).g;
-  float b = texture2D(uTexture, vUv - vec2( amount, 0.0)).b;
+  // Central-difference gradient → displacement vector
+  float gx = texture2D(uFluid, vUv + vec2(px.x, 0.0)).r
+           - texture2D(uFluid, vUv - vec2(px.x, 0.0)).r;
+  float gy = texture2D(uFluid, vUv + vec2(0.0, px.y)).r
+           - texture2D(uFluid, vUv - vec2(0.0, px.y)).r;
+
+  vec2 disp = vec2(gx, gy) * 0.12;
+
+  // Subtle chromatic split along the displacement axis
+  float split = length(disp) * 1.5;
+  float r = texture2D(uTexture, vUv + disp + vec2(split, 0.0)).r;
+  float g = texture2D(uTexture, vUv + disp                   ).g;
+  float b = texture2D(uTexture, vUv + disp - vec2(split, 0.0)).b;
 
   gl_FragColor = vec4(r, g, b, 1.0);
-}`,
-  },
+}`;
 
-  {
-    name: 'Pixelate',
-    frag: GLSL_HEAD + /* glsl */`
-void main() {
-  // Block size in pixels — increase for chunkier look
-  float blockSize = 18.0;
+// ─── FluidSim ─────────────────────────────────────────────────────────────────
 
-  // Convert vUv to pixel coords, snap to block grid, convert back
-  vec2 pixelCoord = vUv * uResolution;
-  vec2 snapped    = floor(pixelCoord / blockSize) * blockSize + blockSize * 0.5;
-  vec2 snapUv     = snapped / uResolution;
+class FluidSim {
+  constructor(renderer) {
+    this._renderer = renderer;
+    this._simRes = new THREE.Vector2(256, 256);
 
-  gl_FragColor = texture2D(uTexture, snapUv);
-}`,
-  },
+    this._scene  = new THREE.Scene();
+    this._camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this._quad   = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
+    this._scene.add(this._quad);
 
-  {
-    name: 'Scanlines',
-    frag: GLSL_HEAD + /* glsl */`
-void main() {
-  vec4 c = texture2D(uTexture, vUv);
+    this._initTargets();
+    this._initMaterials();
+  }
 
-  // Horizontal line every 3 physical pixels
-  float line = step(0.5, fract(gl_FragCoord.y / 3.0));
-  vec3 rgb   = c.rgb * (0.55 + 0.45 * line);
+  _makeRT() {
+    return new THREE.WebGLRenderTarget(this._simRes.x, this._simRes.y, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format:    THREE.RGBAFormat,
+      type:      THREE.HalfFloatType,
+    });
+  }
 
-  gl_FragColor = vec4(rgb, 1.0);
-}`,
-  },
+  _initTargets() {
+    this._rtCamCurr = this._makeRT();
+    this._rtCamPrev = this._makeRT();
+    this._rtMotion  = this._makeRT();
+    // 3 wave buffers — write target is never the same RT as either read target
+    this._rtWaveA   = this._makeRT(); // current state (t)
+    this._rtWaveB   = this._makeRT(); // previous state (t-1)
+    this._rtWaveT   = this._makeRT(); // temp write target (rotated each frame)
+  }
 
-  {
-    name: 'Edge Detect',
-    frag: GLSL_HEAD + /* glsl */`
-// Sobel edge detection on luminance
-float luma(vec2 uv) {
-  return dot(texture2D(uTexture, uv).rgb, vec3(0.299, 0.587, 0.114));
+  _mat(frag, uniforms) {
+    return new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: frag, uniforms });
+  }
+
+  _initMaterials() {
+    this._copyMat = this._mat(COPY_FRAG, {
+      uTexture: { value: null },
+    });
+
+    this._motionMat = this._mat(MOTION_FRAG, {
+      uCurrent:  { value: null },
+      uPrevious: { value: null },
+    });
+
+    this._waveMat = this._mat(WAVE_FRAG, {
+      uWaveCurr: { value: null },
+      uWavePrev: { value: null },
+      uMotion:   { value: null },
+      uSimRes:   { value: this._simRes },
+    });
+
+    this._dispMat = this._mat(FLUID_DISP_FRAG, {
+      uTexture:    { value: null },
+      uFluid:      { value: null },
+      uResolution: { value: new THREE.Vector2() },
+      uSimRes:     { value: this._simRes },
+      uTime:       { value: 0 },
+    });
+  }
+
+  _pass(material, target) {
+    this._quad.material = material;
+    this._renderer.setRenderTarget(target);
+    this._renderer.render(this._scene, this._camera);
+  }
+
+  reset() {
+    const prev = this._renderer.getRenderTarget();
+    [this._rtWaveA, this._rtWaveB, this._rtWaveT, this._rtMotion].forEach(rt => {
+      this._renderer.setRenderTarget(rt);
+      this._renderer.clear();
+    });
+    this._renderer.setRenderTarget(prev);
+  }
+
+  update(cameraTexture) {
+    // 1. Capture camera frame at sim resolution
+    this._copyMat.uniforms.uTexture.value = cameraTexture;
+    this._pass(this._copyMat, this._rtCamCurr);
+
+    // 2. Motion detection
+    this._motionMat.uniforms.uCurrent.value  = this._rtCamCurr.texture;
+    this._motionMat.uniforms.uPrevious.value = this._rtCamPrev.texture;
+    this._pass(this._motionMat, this._rtMotion);
+
+    // 3. Wave step — read A+B, write T, then rotate so A is always current
+    this._waveMat.uniforms.uWaveCurr.value = this._rtWaveA.texture;
+    this._waveMat.uniforms.uWavePrev.value = this._rtWaveB.texture;
+    this._waveMat.uniforms.uMotion.value   = this._rtMotion.texture;
+    this._pass(this._waveMat, this._rtWaveT);
+    [this._rtWaveA, this._rtWaveB, this._rtWaveT] =
+      [this._rtWaveT, this._rtWaveA, this._rtWaveB];
+
+    // 4. Advance camera buffer
+    [this._rtCamCurr, this._rtCamPrev] = [this._rtCamPrev, this._rtCamCurr];
+  }
+
+  display(cameraTexture, elapsedTime, resolution) {
+    this._dispMat.uniforms.uTexture.value    = cameraTexture;
+    this._dispMat.uniforms.uFluid.value      = this._rtWaveA.texture;
+    this._dispMat.uniforms.uTime.value       = elapsedTime;
+    this._dispMat.uniforms.uResolution.value.copy(resolution);
+    this._pass(this._dispMat, null);
+  }
+
+  dispose() {
+    [this._rtCamCurr, this._rtCamPrev, this._rtMotion,
+     this._rtWaveA, this._rtWaveB, this._rtWaveT].forEach(rt => rt.dispose());
+  }
 }
 
-void main() {
-  vec2 px = 1.0 / uResolution; // one-pixel step in UV space
-
-  // 3×3 Sobel kernel samples
-  float tl = luma(vUv + px * vec2(-1.0,  1.0));
-  float tc = luma(vUv + px * vec2( 0.0,  1.0));
-  float tr = luma(vUv + px * vec2( 1.0,  1.0));
-  float ml = luma(vUv + px * vec2(-1.0,  0.0));
-  float mr = luma(vUv + px * vec2( 1.0,  0.0));
-  float bl = luma(vUv + px * vec2(-1.0, -1.0));
-  float bc = luma(vUv + px * vec2( 0.0, -1.0));
-  float br = luma(vUv + px * vec2( 1.0, -1.0));
-
-  float gx = -tl - 2.0*ml - bl + tr + 2.0*mr + br;
-  float gy = -tl - 2.0*tc - tr + bl + 2.0*bc + br;
-  float edge = clamp(sqrt(gx*gx + gy*gy) * 4.0, 0.0, 1.0);
-
-  gl_FragColor = vec4(vec3(edge), 1.0);
-}`,
-  },
-
-  {
-    name: 'Duotone',
-    frag: GLSL_HEAD + /* glsl */`
-void main() {
-  vec3 c = texture2D(uTexture, vUv).rgb;
-  float luma = dot(c, vec3(0.299, 0.587, 0.114));
-
-  // Cycle hue over time for the two tone colours
-  float t = uTime * 0.25;
-  vec3 shadow   = vec3(0.05, 0.02, 0.18 + 0.1 * sin(t));
-  vec3 highlight = vec3(1.0, 0.75 + 0.2 * sin(t + 1.5), 0.1);
-
-  gl_FragColor = vec4(mix(shadow, highlight, luma), 1.0);
-}`,
-  },
-
-  {
-    name: 'Glitch',
-    frag: GLSL_HEAD + /* glsl */`
-// Pseudo-random hash
-float rand(float n) { return fract(sin(n) * 43758.5453); }
-
-void main() {
-  // Slice the image into horizontal bands and randomly offset some of them
-  float sliceHeight = 0.04;
-  float band = floor(vUv.y / sliceHeight);
-
-  // Only glitch a fraction of bands, and change per ~0.1s window
-  float timeSlot = floor(uTime * 10.0);
-  float r = rand(band * 1.7 + timeSlot * 13.3);
-  float active = step(0.92, r); // ~8 % of bands at any moment
-
-  float shift = (rand(band + timeSlot) - 0.5) * 0.08 * active;
-  vec2 uv = vec2(fract(vUv.x + shift), vUv.y);
-
-  vec4 c = texture2D(uTexture, uv);
-
-  // Colour split on glitching bands
-  float cr = texture2D(uTexture, uv + vec2(0.015 * active, 0.0)).r;
-  float cb = texture2D(uTexture, uv - vec2(0.015 * active, 0.0)).b;
-
-  gl_FragColor = vec4(cr, c.g, cb, 1.0);
-}`,
-  },
-];
-
-// ─── UI helpers ──────────────────────────────────────────────────────────────
+// ─── UI helpers ───────────────────────────────────────────────────────────────
 
 const overlay = document.getElementById('overlay');
+function showOverlay(msg) { overlay.textContent = msg; overlay.classList.remove('hidden'); }
+function hideOverlay()    { overlay.classList.add('hidden'); }
 
-function showOverlay(msg) {
-  overlay.textContent = msg;
-  overlay.classList.remove('hidden');
-}
-
-function hideOverlay() {
-  overlay.classList.add('hidden');
-}
-
-// ─── Shader loading ───────────────────────────────────────────────────────────
-
-async function loadText(path) {
-  const res = await fetch(path);
-  if (!res.ok) throw new Error(`HTTP ${res.status} loading ${path}`);
-  return res.text();
-}
-
-// ─── Camera ──────────────────────────────────────────────────────────────────
+// ─── Camera ───────────────────────────────────────────────────────────────────
 
 async function openCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -232,71 +267,9 @@ async function openCamera() {
   return video;
 }
 
-// ─── Effect switcher UI ───────────────────────────────────────────────────────
-
-function buildEffectUI(material) {
-  let current = 0;
-
-  // Toast label (top-centre, fades out)
-  const toast = document.createElement('div');
-  toast.id = 'effect-toast';
-  document.body.appendChild(toast);
-
-  let toastTimer = null;
-  function showToast(name) {
-    toast.textContent = name;
-    toast.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toast.classList.remove('show'), 1400);
-  }
-
-  // Button (bottom-centre)
-  const btn = document.createElement('button');
-  btn.id = 'effect-btn';
-  document.body.appendChild(btn);
-
-  function apply(index) {
-    current = index;
-    const effect = EFFECTS[current];
-    material.fragmentShader = effect.frag;
-    material.needsUpdate = true;
-    btn.textContent = `${effect.name}  ›`;
-    showToast(effect.name);
-  }
-
-  btn.addEventListener('click', () => apply((current + 1) % EFFECTS.length));
-
-  // Keyboard: Space / ArrowRight → next,  ArrowLeft → previous
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowRight' || e.key === ' ') {
-      e.preventDefault();
-      apply((current + 1) % EFFECTS.length);
-    } else if (e.key === 'ArrowLeft') {
-      e.preventDefault();
-      apply((current - 1 + EFFECTS.length) % EFFECTS.length);
-    }
-  });
-
-  apply(0); // initialise with first effect
-}
-
-// ─── Entry point ─────────────────────────────────────────────────────────────
+// ─── Entry point ──────────────────────────────────────────────────────────────
 
 async function main() {
-  // Load only the vertex shader from disk (fragment shaders are inline above)
-  let vertSrc;
-  try {
-    vertSrc = await loadText('shaders/vertex.glsl');
-  } catch (err) {
-    showOverlay(
-      `Failed to load vertex shader:\n${err.message}\n\n` +
-      `If opening as file://, add --allow-file-access-from-files\n` +
-      `to your Chromium flags (see README).`
-    );
-    return;
-  }
-
-  // Open camera
   let video;
   try {
     showOverlay('Requesting camera…');
@@ -308,59 +281,40 @@ async function main() {
 
   hideOverlay();
 
-  // Three.js renderer
   const renderer = new THREE.WebGLRenderer({ antialias: false });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  const scene  = new THREE.Scene();
-  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-
-  // VideoTexture
   const texture = new THREE.VideoTexture(video);
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.colorSpace = THREE.SRGBColorSpace;
 
-  // Uniforms — see GLSL_HEAD for documentation
-  const uniforms = {
-    uTexture:    { value: texture },
-    uTime:       { value: 0.0 },
-    uResolution: { value: new THREE.Vector2(
-      window.innerWidth  * window.devicePixelRatio,
-      window.innerHeight * window.devicePixelRatio,
-    )},
-  };
+  const resolution = new THREE.Vector2(
+    window.innerWidth  * window.devicePixelRatio,
+    window.innerHeight * window.devicePixelRatio,
+  );
 
-  const material = new THREE.ShaderMaterial({
-    uniforms,
-    vertexShader:   vertSrc,
-    fragmentShader: EFFECTS[0].frag, // overwritten immediately by buildEffectUI
-  });
+  const fluidSim = new FluidSim(renderer);
+  fluidSim.reset();
 
-  scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
-
-  // Build the switcher button (also sets the initial effect)
-  buildEffectUI(material);
-
-  // Resize
   window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
-    uniforms.uResolution.value.set(
+    resolution.set(
       window.innerWidth  * window.devicePixelRatio,
       window.innerHeight * window.devicePixelRatio,
     );
   });
 
-  // Render loop
-  let startTime = performance.now();
+  const startTime = performance.now();
 
   function animate() {
     requestAnimationFrame(animate);
     texture.needsUpdate = true;
-    uniforms.uTime.value = (performance.now() - startTime) / 1000;
-    renderer.render(scene, camera);
+    const t = (performance.now() - startTime) / 1000;
+    fluidSim.update(texture);
+    fluidSim.display(texture, t, resolution);
   }
 
   animate();

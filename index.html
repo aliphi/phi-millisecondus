@@ -34,48 +34,6 @@
       pointer-events: none;
     }
     #overlay.hidden { display: none; }
-
-    #effect-btn {
-      position: fixed;
-      bottom: 2rem;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 0.55rem 1.4rem;
-      background: rgba(0, 0, 0, 0.55);
-      color: #fff;
-      font-family: monospace;
-      font-size: 0.85rem;
-      border: 1px solid rgba(255,255,255,0.25);
-      border-radius: 999px;
-      cursor: pointer;
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
-      user-select: none;
-      transition: background 0.15s, border-color 0.15s;
-      white-space: nowrap;
-      z-index: 10;
-    }
-    #effect-btn:hover  { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.5); }
-    #effect-btn:active { background: rgba(255,255,255,0.25); }
-
-    /* Brief label that fades in/out when the effect changes */
-    #effect-toast {
-      position: fixed;
-      top: 1.5rem;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 0.4rem 1.1rem;
-      background: rgba(0,0,0,0.6);
-      color: #fff;
-      font-family: monospace;
-      font-size: 0.8rem;
-      border-radius: 999px;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.25s;
-      z-index: 10;
-    }
-    #effect-toast.show { opacity: 1; }
   </style>
 </head>
 <body>
