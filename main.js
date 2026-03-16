@@ -84,12 +84,19 @@ void main() {
     vec2  dir         = r > 0.0001 ? centered / r : vec2(0.0);
     dir.x            /= aspect;
     float dispPat     = pat * 2.0 - 1.0; // remap [0,1] → [-1,1]
-    vec2 camUV        = vUv + vec2(dir.x * dispPat * uDispX, dir.y * dispPat * uDispY);
-    camUV             = clamp(camUV, 0.0, 1.0);
-    camUV.x           = 1.0 - camUV.x;
-    vec4  cam         = texture2D(uTexture, camUV);
-    float luma        = dot(cam.rgb, vec3(0.299, 0.587, 0.114));
-    gl_FragColor = vec4(vec3(luma), 1.0);
+    // Fade displacement at edges to prevent stretching/clamping artifacts
+    vec2  edgeFade    = smoothstep(0.0, 0.12, vUv) * smoothstep(1.0, 0.88, vUv);
+    float fade        = edgeFade.x * edgeFade.y;
+    vec2  disp        = vec2(dir.x * dispPat * uDispX, dir.y * dispPat * uDispY) * fade;
+    // Subtle chromatic aberration: R/B offset slightly along displacement axis
+    float cab         = 0.004;
+    vec2  uvR         = clamp(vec2(1.0 - (vUv.x + disp.x + dir.x * cab), vUv.y + disp.y + dir.y * cab), 0.0, 1.0);
+    vec2  uvG         = clamp(vec2(1.0 - (vUv.x + disp.x),               vUv.y + disp.y              ), 0.0, 1.0);
+    vec2  uvB         = clamp(vec2(1.0 - (vUv.x + disp.x - dir.x * cab), vUv.y + disp.y - dir.y * cab), 0.0, 1.0);
+    float cr          = texture2D(uTexture, uvR).r;
+    float cg          = texture2D(uTexture, uvG).g;
+    float cb          = texture2D(uTexture, uvB).b;
+    gl_FragColor = vec4(cr, cg, cb, 1.0);
   } else {
     gl_FragColor = vec4(vec3(pat), 1.0);
   }
