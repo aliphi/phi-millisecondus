@@ -3,43 +3,36 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Persian Mirrorworks</title>
+  <title>Pixel Ramp</title>
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background: #000;
-    }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
     canvas { display: block; }
     #overlay {
-      position: fixed;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #fff;
-      font-family: monospace;
-      font-size: 0.9rem;
-      text-align: center;
-      padding: 2rem;
-      background: rgba(0,0,0,0.85);
-      white-space: pre-line;
-      pointer-events: none;
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.72);
+      z-index: 10;
     }
-    #overlay.hidden { display: none; }
+    #startBtn {
+      font: 600 16px/1 monospace;
+      letter-spacing: 0.08em;
+      color: #fff;
+      background: none;
+      border: 1.5px solid rgba(255,255,255,0.55);
+      padding: 14px 32px;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+    #startBtn:hover { border-color: #fff; }
   </style>
 </head>
 <body>
-  <div id="overlay">Starting camera…</div>
+  <div id="overlay">
+    <button id="startBtn">Enable Camera</button>
+  </div>
+
   <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"
-      }
-    }
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
   </script>
   <script type="module" src="main.js"></script>
 </body>
