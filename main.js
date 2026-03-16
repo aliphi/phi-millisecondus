@@ -122,7 +122,6 @@ void main() {
 // ─── Camera ───────────────────────────────────────────────────────────────────
 
 let videoTexture = null;
-let hasCamera    = false;
 
 async function startCamera() {
   try {
@@ -138,10 +137,8 @@ async function startCamera() {
     videoTexture          = new THREE.VideoTexture(video);
     videoTexture.minFilter = THREE.LinearFilter;
     videoTexture.magFilter = THREE.LinearFilter;
-    hasCamera             = true;
-    uniforms.uTexture.value = videoTexture;
+    uniforms.uTexture.value   = videoTexture;
     uniforms.uHasCamera.value = true;
-    document.getElementById('overlay').style.display = 'none';
   } catch (e) {
     console.error('Camera error:', e);
   }
@@ -180,9 +177,9 @@ window.addEventListener('resize', () => {
   );
 });
 
-// ─── Overlay button ───────────────────────────────────────────────────────────
+// ─── Auto-start camera ────────────────────────────────────────────────────────
 
-document.getElementById('startBtn').addEventListener('click', startCamera);
+startCamera();
 
 // ─── Render loop ──────────────────────────────────────────────────────────────
 
