@@ -185,17 +185,18 @@ window.addEventListener('resize', () => {
   );
 });
 
-// ─── Auto-start camera after page is fully loaded ─────────────────────────────
-
-window.addEventListener('load', startCamera);
-
-// ─── Render loop ──────────────────────────────────────────────────────────────
+// ─── Start camera, then begin render loop ─────────────────────────────────────
 
 const t0 = performance.now();
 
-(function animate() {
+function animate() {
   requestAnimationFrame(animate);
   uniforms.uTime.value = (performance.now() - t0) / 1000;
   if (videoTexture) videoTexture.needsUpdate = true;
   renderer.render(scene, camera);
-})();
+}
+
+window.addEventListener('load', async () => {
+  await startCamera();
+  animate();
+});
