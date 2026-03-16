@@ -62,10 +62,10 @@ float dualPattern(vec2 px, float block, float aspect) {
   vec2  snapRot = floor(pxRot / blockB) * blockB + blockB * 0.5;
   vec2  snapBack = rot45inv(snapRot);
   vec2  cB      = (snapBack / uResolution - 0.5) * vec2(aspect, 1.0);
-  float patB    = circlePattern(cB, 0.37);
+  float patB    = circlePattern(cB, 0.13);
 
-  // Screen blend: bright where either layer is bright
-  return 1.0 - (1.0 - patA) * (1.0 - patB);
+  // Max blend: whichever layer is brighter wins — both grids always equally visible
+  return max(patA, patB);
 }
 
 void main() {
@@ -88,7 +88,7 @@ void main() {
     vec2  snapRot = floor(pxRot / blockB) * blockB + blockB * 0.5;
     vec2  snapBk  = rot45inv(snapRot);
     vec2  cB      = (snapBk / uResolution - 0.5) * vec2(aspect, 1.0);
-    float patB    = circlePattern(cB, 0.37);
+    float patB    = circlePattern(cB, 0.13);
 
     float dA = patA * 2.0 - 1.0; // [0,1] → [-1,1]
     float dB = patB * 2.0 - 1.0;
