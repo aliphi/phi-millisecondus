@@ -156,7 +156,6 @@ document.body.appendChild(renderer.domElement);
 
 const scene  = new THREE.Scene();
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-camera.rotation.z = -Math.PI / 2;
 
 const uniforms = {
   uTime:       { value: 0 },
@@ -198,14 +197,14 @@ function animate() {
   renderer.render(scene, camera);
 }
 
-// const sliderX = document.getElementById('sliderX');
-// const sliderY = document.getElementById('sliderY');
-// const sliderW = document.getElementById('sliderW');
-// sliderX.addEventListener('input', () => { uniforms.uDispX.value = parseFloat(sliderX.value); document.getElementById('valX').textContent = sliderX.value; });
-// sliderY.addEventListener('input', () => { uniforms.uDispY.value = parseFloat(sliderY.value); document.getElementById('valY').textContent = sliderY.value; });
-// sliderW.addEventListener('input', () => { uniforms.uRingWidth.value = parseFloat(sliderW.value); document.getElementById('valW').textContent = sliderW.value; });
-// const sliderS = document.getElementById('sliderS');
-// sliderS.addEventListener('input', () => { uniforms.uSpeed.value = parseFloat(sliderS.value); document.getElementById('valS').textContent = sliderS.value; });
+const sliderX = document.getElementById('sliderX');
+const sliderY = document.getElementById('sliderY');
+const sliderW = document.getElementById('sliderW');
+sliderX.addEventListener('input', () => { uniforms.uDispX.value = parseFloat(sliderX.value); document.getElementById('valX').textContent = sliderX.value; });
+sliderY.addEventListener('input', () => { uniforms.uDispY.value = parseFloat(sliderY.value); document.getElementById('valY').textContent = sliderY.value; });
+sliderW.addEventListener('input', () => { uniforms.uRingWidth.value = parseFloat(sliderW.value); document.getElementById('valW').textContent = sliderW.value; });
+const sliderS = document.getElementById('sliderS');
+sliderS.addEventListener('input', () => { uniforms.uSpeed.value = parseFloat(sliderS.value); document.getElementById('valS').textContent = sliderS.value; });
 
 window.addEventListener('load', async () => {
   await startCamera();
