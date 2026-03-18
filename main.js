@@ -98,12 +98,16 @@ void main() {
     float fade     = edgeFade.x * edgeFade.y;
     vec2  disp     = vec2(dA * uDispX, dB * uDispY) * fade;
 
+    // Rotate base UV -90 degrees around center for camera input
+    vec2 rotCentered = vUv - 0.5;
+    vec2 rotUv = vec2(rotCentered.y, -rotCentered.x) + 0.5;
+
     // Chromatic aberration along the displacement direction
     float cab      = 0.004;
     vec2  cabDir   = length(disp) > 0.0001 ? normalize(disp) : vec2(0.0);
-    vec2  uvR      = clamp(vec2(1.0 - (vUv.x + disp.x + cabDir.x * cab), vUv.y + disp.y + cabDir.y * cab), 0.0, 1.0);
-    vec2  uvG      = clamp(vec2(1.0 - (vUv.x + disp.x),                  vUv.y + disp.y                 ), 0.0, 1.0);
-    vec2  uvB      = clamp(vec2(1.0 - (vUv.x + disp.x - cabDir.x * cab), vUv.y + disp.y - cabDir.y * cab), 0.0, 1.0);
+    vec2  uvR      = clamp(vec2(1.0 - (rotUv.x + disp.x + cabDir.x * cab), rotUv.y + disp.y + cabDir.y * cab), 0.0, 1.0);
+    vec2  uvG      = clamp(vec2(1.0 - (rotUv.x + disp.x),                  rotUv.y + disp.y                 ), 0.0, 1.0);
+    vec2  uvB      = clamp(vec2(1.0 - (rotUv.x + disp.x - cabDir.x * cab), rotUv.y + disp.y - cabDir.y * cab), 0.0, 1.0);
     float cr       = texture2D(uTexture, uvR).r;
     float cg       = texture2D(uTexture, uvG).g;
     float cb       = texture2D(uTexture, uvB).b;
@@ -156,7 +160,6 @@ document.body.appendChild(renderer.domElement);
 
 const scene  = new THREE.Scene();
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-camera.rotation.z = -Math.PI / 2;
 
 const uniforms = {
   uTime:       { value: 0 },
